@@ -10,6 +10,7 @@ const AuthPage: React.FC = () => {
     confirmPassword: ''
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [showConnectionMessage, setShowConnectionMessage] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const validateForm = () => {
@@ -46,6 +47,12 @@ const AuthPage: React.FC = () => {
     if (!validateForm()) return;
 
     setIsLoading(true);
+    setShowConnectionMessage(false);
+
+    // Set a timeout to show connection message after 5 seconds
+    const connectionTimeoutId = setTimeout(() => {
+      setShowConnectionMessage(true);
+    }, 5000);
 
     try {
       let response;
@@ -63,18 +70,25 @@ const AuthPage: React.FC = () => {
         });
       }
 
+      // Clear the timeout since we got a response
+      clearTimeout(connectionTimeoutId);
+
       // Store token
       setToken(response.token);
 
       // Redirect or handle success
       console.log('Authentication successful:', response);
     } catch (error) {
+      // Clear the timeout
+      clearTimeout(connectionTimeoutId);
+      
       console.error('Auth error:', error);
       setErrors({
         email: error instanceof Error ? error.message : 'Authentication failed. Please try again.'
       });
     } finally {
       setIsLoading(false);
+      setShowConnectionMessage(false);
     }
   };
 
@@ -176,10 +190,22 @@ const AuthPage: React.FC = () => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 transition"
+            className="w-full bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? 'Processing...' : isSignUp ? 'Sign Up' : 'Login'}
           </button>
+
+          {/* Connection message */}
+          {showConnectionMessage && (
+            <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+              <div className="flex items-center justify-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600 mr-3"></div>
+                <p className="text-purple-700 text-sm text-center">
+                  Server is connecting to the database. Please wait for a moment, you will soon be redirected.
+                </p>
+              </div>
+            </div>
+          )}
         </form>
 
         <div className="mt-4 text-center">

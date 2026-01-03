@@ -13,6 +13,8 @@ const generateToken = (userId) => {
 
 // POST /api/auth/signup - Register new user
 router.post('/signup', async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { name, email, password } = req.body;
     
@@ -43,6 +45,11 @@ router.post('/signup', async (req, res) => {
     // Generate token
     const token = generateToken(user._id);
     
+    const responseTime = Date.now() - startTime;
+    if (responseTime > 5000) {
+      console.warn(`⚠️ Slow signup response: ${responseTime}ms for user ${user.email}`);
+    }
+    
     // Return user and token
     res.status(201).json({
       token,
@@ -55,15 +62,26 @@ router.post('/signup', async (req, res) => {
       }
     });
   } catch (error) {
+    const responseTime = Date.now() - startTime;
     console.error('Signup error:', error);
-    res.status(500).json({ 
-      error: 'Failed to create account. Please try again.' 
-    });
+    console.error(`Response time: ${responseTime}ms`);
+    
+    // Provide more specific error messages for database connection issues
+    let errorMessage = 'Failed to create account. Please try again.';
+    if (error.name === 'MongoNetworkError' || error.name === 'MongooseServerSelectionError') {
+      errorMessage = 'Database connection issue. Please try again in a moment.';
+    } else if (error.name === 'MongooseError' && error.message.includes('buffering timed out')) {
+      errorMessage = 'Database is temporarily unavailable. Please try again.';
+    }
+    
+    res.status(500).json({ error: errorMessage });
   }
 });
 
 // POST /api/auth/login - Login user
 router.post('/login', async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { email, password } = req.body;
     
@@ -109,6 +127,11 @@ router.post('/login', async (req, res) => {
       console.log(`✅ Migrated ${courseIds.length} courses to enrolledCourses for user ${user.email}`);
     }
     
+    const responseTime = Date.now() - startTime;
+    if (responseTime > 5000) {
+      console.warn(`⚠️ Slow login response: ${responseTime}ms for user ${user.email}`);
+    }
+    
     // Return user and token
     res.json({
       token,
@@ -121,10 +144,19 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
+    const responseTime = Date.now() - startTime;
     console.error('Login error:', error);
-    res.status(500).json({ 
-      error: 'Failed to login. Please try again.' 
-    });
+    console.error(`Response time: ${responseTime}ms`);
+    
+    // Provide more specific error messages for database connection issues
+    let errorMessage = 'Failed to login. Please try again.';
+    if (error.name === 'MongoNetworkError' || error.name === 'MongooseServerSelectionError') {
+      errorMessage = 'Database connection issue. Please try again in a moment.';
+    } else if (error.name === 'MongooseError' && error.message.includes('buffering timed out')) {
+      errorMessage = 'Database is temporarily unavailable. Please try again.';
+    }
+    
+    res.status(500).json({ error: errorMessage });
   }
 });
 

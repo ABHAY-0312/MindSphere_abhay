@@ -16,6 +16,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuth }) => {
     confirmPassword: ''
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [showConnectionMessage, setShowConnectionMessage] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   if (!isOpen) return null;
@@ -54,6 +55,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuth }) => {
     if (!validateForm()) return;
 
     setIsLoading(true);
+    setShowConnectionMessage(false);
+
+    // Set a timeout to show connection message after 5 seconds
+    const connectionTimeoutId = setTimeout(() => {
+      setShowConnectionMessage(true);
+    }, 5000);
 
     try {
       let response;
@@ -71,6 +78,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuth }) => {
         });
       }
 
+      // Clear the timeout since we got a response
+      clearTimeout(connectionTimeoutId);
+
       // Store token
       setToken(response.token);
 
@@ -79,12 +89,16 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuth }) => {
 
       onClose();
     } catch (error) {
+      // Clear the timeout
+      clearTimeout(connectionTimeoutId);
+      
       console.error('Auth error:', error);
       setErrors({
         email: error instanceof Error ? error.message : 'Authentication failed. Please try again.'
       });
     } finally {
       setIsLoading(false);
+      setShowConnectionMessage(false);
     }
   };
 
@@ -182,10 +196,22 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuth }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition"
+              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Processing...' : isSignUp ? 'Sign Up' : 'Login'}
             </button>
+
+            {/* Connection message */}
+            {showConnectionMessage && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                  <p className="text-blue-700 text-sm text-center">
+                    Server is connecting to the database. Please wait for a moment, you will soon be redirected.
+                  </p>
+                </div>
+              </div>
+            )}
           </form>
 
           <div className="mt-4 text-center">
