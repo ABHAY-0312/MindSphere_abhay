@@ -1076,25 +1076,32 @@ For each question:
 - Provide a specific explanation for why the correct answer is right, referencing the question and options.
 - Vary the difficulty level (easy, medium, hard).
 
-Return the response as a valid JSON object with this exact structure:
+IMPORTANT:
+- Return ONLY valid JSON, wrapped in a single code block labeled json (i.e. \`\`\`json ... \`\`\`).
+- Do NOT include any explanation, markdown, or extra text before or after the code block.
+- All property names and string values must use double quotes.
+
+Return the response as a valid JSON object with this exact structure (do NOT include this as markdown, just as plain text inside the code block!):
 {
-  \"quizQuestions\": [
+  "quizQuestions": [
     {
-      \"type\": \"multiple-choice\",
-      \"question\": \"string\",
-      \"options\": [\"string\", \"string\", \"string\", \"string\"],
-      \"correctAnswer\": \"string\",
-      \"explanations\": {
-        \"A\": \"string\",
-        \"B\": \"string\",
-        \"C\": \"string\",
-        \"D\": \"string\"
+      "type": "multiple-choice",
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "correctAnswer": "string",
+      "explanations": {
+        "A": "string",
+        "B": "string",
+        "C": "string",
+        "D": "string"
       },
-      \"correctExplanation\": \"string\",
-      \"difficulty\": \"easy|medium|hard\"
+      "correctExplanation": "string",
+      "difficulty": "easy|medium|hard"
     }
   ]
-}`;
+}
+```
+`;
 
   try {
     console.log('🤖 Calling AI for additional quiz questions...');
@@ -1157,27 +1164,15 @@ Return the response as a valid JSON object with this exact structure:
 
 // Generate quiz questions based on content
 export const generateQuizQuestions = async ({ title, source, content, fileName, url, timestamp }) => {
-  const prompt = `Based on the following content, generate 4-6 quiz questions. Make them educational and relevant to the content.
-
-Content Title: ${title}
-Source Type: ${source}
-${fileName ? `File Name: ${fileName}` : ''}
-${url ? `URL: ${url}` : ''}
-
-Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
-
-Please generate questions with the following format:
-{
-  "quizQuestions": [
-    {
-      "question": "Question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": "Option A",
-      "explanation": "Why this is correct",
-      "difficulty": "easy|medium|hard"
-    }
-  ]
-}`;
+  const prompt =
+    'Based on the following content, generate 4-6 quiz questions. Make them educational and relevant to the content.\n\n' +
+    'Content Title: ' + title + '\n' +
+    'Source Type: ' + source + '\n' +
+    (fileName ? 'File Name: ' + fileName + '\n' : '') +
+    (url ? 'URL: ' + url + '\n' : '') +
+    'Content: ' + content.substring(0, 3000) + (content.length > 3000 ? '...' : '') + '\n\n' +
+    'Please generate questions with the following format:\n' +
+    '{\n  "quizQuestions": [\n    {\n      "question": "Question text",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option A",\n      "explanation": "Why this is correct",\n      "difficulty": "easy|medium|hard"\n    }\n  ]\n}';
 
   try {
     const response = await makeAICall(prompt);
@@ -1190,17 +1185,14 @@ Please generate questions with the following format:
 
 // Generate flashcards based on content
 export const generateFlashcards = async ({ title, source, content, fileName, url }) => {
-  const prompt = `Based on the following content, generate 6-8 educational flashcards with key concepts and terms.
-
-Content Title: ${title}
-Source Type: ${source}
-${fileName ? `File Name: ${fileName}` : ''}
-${url ? `URL: ${url}` : ''}
-
-Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
-
-Please generate flashcards with the following format:
-{
+  const prompt =
+    'Based on the following content, generate 6-8 educational flashcards with key concepts and terms.\n\n' +
+    'Content Title: ' + title + '\n' +
+    'Source Type: ' + source + '\n' +
+    (fileName ? 'File Name: ' + fileName + '\n' : '') +
+    (url ? 'URL: ' + url + '\n' : '') +
+    'Content: ' + content.substring(0, 3000) + (content.length > 3000 ? '...' : '') + '\n\n' +
+    'Please generate flashcards with the following format:\n{ ';
   "flashcards": [
     {
       "front": "Key concept or term",
@@ -1257,23 +1249,18 @@ const makeAICall = async (prompt) => {
     try {
       const parsed = parseAiJsonSafely(text);
       return parsed;
-    } catch (err) {
-      console.warn('Failed to parse AI response in makeAICall, attempting one reformat retry:', err.message);
-      // One controlled re-ask: ask the model to reformat the previous response into valid JSON only
-      try {
-        const reformatPrompt = 'The previous model response was not valid JSON. Below is the full response. Please return the SAME JSON object only, wrapped in a single ```json ... ``` fenced code block. Do NOT add any extra text or explanations. For any code samples inside string fields, replace newlines with the two-character sequence \\n and escape double quotes as \\\".\n\nPREVIOUS RESPONSE:\n' + text;
-        const reformattedText = await makeGeminiCallWithRotation(reformatPrompt);
+    } catch (parseError) {
+      console.warn('⚠️ parseAiJsonSafely failed, trying jsonrepair...');
+      if (typeof jsonRepair === 'function') {
         try {
-          const parsed2 = parseAiJsonSafely(reformattedText);
-          console.log('✅ Successfully parsed after controlled reformat retry');
-          return parsed2;
-        } catch (err2) {
-          console.error('Reformat retry also failed to produce valid JSON:', err2);
-          throw err2;
+          const repaired = jsonRepair(text);
+          parsed = JSON.parse(repaired);
+        } catch (repairError) {
+          console.error('❌ jsonrepair also failed:', repairError);
+          throw parseError;
         }
-      } catch (retryErr) {
-        console.error('Controlled reformat retry failed:', retryErr);
-        throw err;
+      } else {
+        throw parseError;
       }
     }
   } catch (error) {
