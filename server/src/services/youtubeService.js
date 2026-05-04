@@ -129,8 +129,8 @@ export const searchYoutubeVideos = async (topic, maxResults = 3) => {
  * @returns {Promise<Object|null>} Object with videoId, videoUrl, title, and thumbnail, or null if not found
  */
 export const getYoutubeVideoForLesson = async (lessonTitle, courseTopic = '') => {
-  // Use the lesson title directly as the search query
-  const searchQuery = lessonTitle.trim();
+  // Use lesson title plus course topic for better relevance
+  const searchQuery = [lessonTitle, courseTopic].filter(Boolean).join(' ').trim();
   try {
     console.log(`🔍 Search Query: ${searchQuery}`);
     const videos = await searchYoutubeVideos(searchQuery, 10); // Fetch more results for better filtering

@@ -779,7 +779,7 @@ Return the response as a valid JSON object with this exact structure:
 };
 
 export const generateChatResponse = async (message, coursesContext) => {
-  if (geminiApiKeys.length === 0 && openRouterApiKey) {
+  if (geminiApiKeys.length === 0 && !openRouterApiKey) {
     throw new Error('AI system is not initialized. Please check your API keys.');
   }
 

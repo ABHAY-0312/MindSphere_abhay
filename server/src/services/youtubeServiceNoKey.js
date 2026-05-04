@@ -131,7 +131,8 @@ export const getYoutubeEmbedForLesson = async (lessonTitle, courseTopic) => {
     console.log(`🔍 Getting YouTube video for: "${lessonTitle}" (${courseTopic})`);
     
     // Try Invidious first (no API key needed)
-    const invidiosResult = await getYoutubeVideoViaInvidious(lessonTitle);
+    const invidiousQuery = [lessonTitle, courseTopic].filter(Boolean).join(' ').trim();
+    const invidiosResult = await getYoutubeVideoViaInvidious(invidiousQuery);
     if (invidiosResult) {
       return invidiosResult;
     }
@@ -140,7 +141,7 @@ export const getYoutubeEmbedForLesson = async (lessonTitle, courseTopic) => {
     const channel = getEducationalChannelForTopic(courseTopic);
     console.log(`📺 Using channel: ${channel.name}`);
     
-    const searchQuery = `${lessonTitle} tutorial`;
+    const searchQuery = [lessonTitle, courseTopic].filter(Boolean).join(' ').trim() + ' tutorial';
     const youtubeSearchUrl = getYoutubeSearchUrl(searchQuery);
     
     return {

@@ -367,19 +367,23 @@ router.post('/', async (req, res) => {
     console.log('🎬 Fetching YouTube videos for lessons...');
     const hasYoutubeKey = !!process.env.YOUTUBE_API_KEY;
     console.log('YouTube API key present:', hasYoutubeKey, '| Value:', process.env.YOUTUBE_API_KEY ? '[SET]' : '[NOT SET]');
+    const videoSearchTopic = courseData.topics && courseData.topics.length > 0
+      ? courseData.topics.join(', ')
+      : courseData.title;
+
     if (hasYoutubeKey) {
       // Use YouTube Data API if key is available
       console.log('🔑 Using YouTube Data API (API key available)');
       courseData.lessons = await getYoutubeVideosForLessons(
         courseData.lessons,
-        courseData.topics.join(', ')
+        videoSearchTopic
       );
     } else {
       // Use no-key method (Invidious + channel search)
       console.log('🔓 Using Invidious/channel search (no API key required)');
       courseData.lessons = await getYoutubeVideosForLessonsNoKey(
         courseData.lessons,
-        courseData.topics.join(', ')
+        videoSearchTopic
       );
     }
     
