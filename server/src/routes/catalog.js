@@ -257,7 +257,7 @@ router.post('/:id/enroll', authMiddleware, async (req, res) => {
         resources: [],
         transcript: ''
       })),
-      notes: (generatedContent.notes || []).map(note => {
+      notes: (generatedContent.notes || []).map((note, index) => {
         let summaryArray = [];
         if (Array.isArray(note.summary)) {
           summaryArray = note.summary;
@@ -267,8 +267,16 @@ router.post('/:id/enroll', authMiddleware, async (req, res) => {
             .map(s => s.trim())
             .filter(s => s.length > 0);
         }
+
+        if (summaryArray.length === 0 && typeof note.content === 'string') {
+          summaryArray = note.content
+            .split(/[\n•\-]|(?<=[.!?])\s+/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0)
+            .slice(0, 6);
+        }
         return {
-          title: note.title,
+          title: note.title || `Section ${index + 1}`,
           summary: summaryArray,
           topics: note.topics || []
         };

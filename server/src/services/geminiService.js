@@ -644,14 +644,14 @@ Generate a detailed course with:
    - Description (2-3 sentences)
    - Duration (e.g., "15 min", "30 min")
    - Detailed content (3-4 paragraphs)
-6. 5-10 quiz questions with:
-   - Question text
-   - Type (multiple-choice, true-false, or fill-blank)
-   - For multiple-choice questions: randomly vary the position of the correct answer (sometimes A, sometimes B, C, or D) to avoid predictable patterns
-   - Options (for multiple-choice)
-   - Correct answer
-   - Explanation
-   - Difficulty (easy, medium, or hard)
+6. 5-10 multiple-choice quiz questions with:
+  - Question text
+  - Type (multiple-choice)
+  - Randomly vary the position of the correct answer (sometimes A, sometimes B, C, or D) to avoid predictable patterns
+  - Options (exactly 4)
+  - Correct answer
+  - Explanation
+  - Difficulty (easy, medium, or hard)
 7. 8-12 flashcards with:
    - Front (question or term)
    - Back (answer or definition)
@@ -700,14 +700,14 @@ Return the response as a valid JSON object with this exact structure:
       \"topics\": [\"string\"]
     }
   ]
-}`;
-  }
-
-  try {
-    // Try Gemini first, then fallback to OpenRouter
-    let text;
-    if (geminiApiKeys.length > 0) {
-      text = await makeGeminiCallWithRotation(prompt);
+    {
+      "type": "multiple-choice",
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "correctAnswer": "string",
+      "explanation": "string",
+      "difficulty": "easy|medium|hard"
+    }
     } else {
       text = await makeOpenRouterCall(prompt);
     }
@@ -798,8 +798,12 @@ IMPORTANT: Provide a SHORT, DIRECT answer (2-4 sentences max).
 - Be clear and to the point`;
 
   try {
-    // Use OpenRouter GPT-3.5 for chatbot responses
-    return await makeOpenRouterCall(prompt, 'openai/gpt-3.5-turbo');
+    if (geminiApiKeys.length > 0) {
+      return await makeGeminiCallWithRotation(prompt);
+    }
+
+    // Use OpenRouter with model fallback when Gemini is unavailable
+    return await makeOpenRouterCall(prompt);
   } catch (error) {
     console.error('Error generating chat response:', error);
     throw new Error('Failed to generate response. Please try again.');

@@ -300,21 +300,29 @@ router.post('/', async (req, res) => {
           resources: [],
           transcript: ''
         })),
-        notes: (generatedContent.notes || []).map(note => {
+        notes: (generatedContent.notes || []).map((note, index) => {
           // Ensure summary is an array of bullet points
           let summaryArray = [];
           if (Array.isArray(note.summary)) {
             summaryArray = note.summary;
           } else if (typeof note.summary === 'string') {
-            // Split by newlines, dashes, or bullet points and clean up
             summaryArray = note.summary
               .split(/[\n•\-]/)
               .map(s => s.trim())
               .filter(s => s.length > 0);
           }
+
+          if (summaryArray.length === 0 && typeof note.content === 'string') {
+            // Fall back to splitting content into short bullet points
+            summaryArray = note.content
+              .split(/[\n•\-]|(?<=[.!?])\s+/)
+              .map(s => s.trim())
+              .filter(s => s.length > 0)
+              .slice(0, 6);
+          }
           
           return {
-            title: note.title,
+            title: note.title || `Section ${index + 1}`,
             summary: summaryArray,
             topics: note.topics || []
           };
