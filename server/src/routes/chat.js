@@ -30,8 +30,17 @@ router.post('/', async (req, res) => {
       topics: course.topics
     }));
     
-    // Generate AI response
-    const reply = await generateChatResponse(message, coursesContext);
+    // Generate AI response with a safe fallback so the chat UI does not hard-fail.
+    let reply;
+    try {
+      reply = await generateChatResponse(message, coursesContext);
+    } catch (aiError) {
+      console.error('Chat AI provider error:', aiError);
+      const personalizedHint = courses.length > 0
+        ? `I couldn't reach the AI service right now, but I can still help. Try asking about one of your courses: ${courses.slice(0, 3).map(c => c.title).join(', ')}.`
+        : `I couldn't reach the AI service right now. Try again in a moment, or ask me to create a study plan and I'll provide a structured template.`;
+      reply = personalizedHint;
+    }
     
     res.json({ reply });
   } catch (error) {
