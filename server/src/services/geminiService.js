@@ -5,22 +5,30 @@ import JSON5 from 'json5';
 import Ajv from 'ajv';
 import { createRequire } from 'module';
 
-// Load jsonrepair via createRequire to support CommonJS/ESM differences
-const require = createRequire(import.meta.url);
+
+// Dynamically import jsonrepair for ESM compatibility
 let jsonRepair = null;
-try {
-  jsonRepair = require('jsonrepair');
-} catch (err) {
-  jsonRepair = null;
-}
+const loadJsonRepair = async () => {
+  if (jsonRepair) return jsonRepair;
+  try {
+    const mod = await import('jsonrepair');
+    // Support both default and named export
+    jsonRepair = mod.default || mod.jsonrepair || mod;
+    return jsonRepair;
+  } catch (err) {
+    jsonRepair = null;
+    return null;
+  }
+};
 
 // Helper to attempt repairing JSON-like text using whatever form the module provides
-const tryJsonRepair = (candidate) => {
-  if (!jsonRepair) return null;
+const tryJsonRepair = async (candidate) => {
+  const repairFn = await loadJsonRepair();
+  if (!repairFn) return null;
   try {
-    if (typeof jsonRepair === 'function') return jsonRepair(candidate);
-    if (jsonRepair && typeof jsonRepair.repair === 'function') return jsonRepair.repair(candidate);
-    if (jsonRepair && jsonRepair.default && typeof jsonRepair.default === 'function') return jsonRepair.default(candidate);
+    if (typeof repairFn === 'function') return repairFn(candidate);
+    if (repairFn && typeof repairFn.repair === 'function') return repairFn.repair(candidate);
+    if (repairFn && repairFn.default && typeof repairFn.default === 'function') return repairFn.default(candidate);
     return null;
   } catch (e) {
     return null;
@@ -1134,27 +1142,32 @@ Return the response as a valid JSON object with this exact structure (do NOT inc
       throw new Error('AI returned empty response text');
     }
 
+    let parsed;
     try {
-      const parsed = parseAiJsonSafely(text);
-      // Validate schema for quiz questions
+      parsed = parseAiJsonSafely(text);
+    } catch (parseError) {
+      console.warn('⚠️ parseAiJsonSafely failed, trying jsonrepair...');
       try {
-        const valid = ajv.validate(quizEnvelopeSchema, parsed);
-        if (!valid) {
-          console.error('Quiz validation failed:', ajv.errors);
-          throw new Error('Quiz schema validation failed');
-        }
-      } catch (validationErr) {
-        console.error('Validation error for quiz questions:', validationErr);
-        throw validationErr;
+        const repaired = await tryJsonRepair(text);
+        parsed = JSON.parse(repaired);
+      } catch (repairError) {
+        console.error('❌ jsonrepair also failed:', repairError);
+        throw parseError;
       }
-
-      console.log('✅ Successfully parsed and validated JSON. Questions count:', parsed.quizQuestions.length);
-      return parsed;
-    } catch (err) {
-      console.error('❌ Failed to parse AI response for quiz questions:', err);
-      console.error('Response preview (first 500 chars):', (text || '').substring(0, 500));
-      throw new Error('Failed to parse AI response for quiz questions');
     }
+    // Validate schema for quiz questions
+    try {
+      const valid = ajv.validate(quizEnvelopeSchema, parsed);
+      if (!valid) {
+        console.error('Quiz validation failed:', ajv.errors);
+        throw new Error('Quiz schema validation failed');
+      }
+    } catch (validationErr) {
+      console.error('Validation error for quiz questions:', validationErr);
+      throw validationErr;
+    }
+    console.log('✅ Successfully parsed and validated JSON. Questions count:', parsed.quizQuestions.length);
+    return parsed;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('❌ Error generating additional quiz questions:', errorMsg);
