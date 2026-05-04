@@ -328,8 +328,13 @@ const makeGeminiCallWithRotation = async (prompt, maxRetries = 2) => {
       }
 
       const text = response.text();
-
+      if (!text || text.trim().length === 0) {
+        throw new Error('Empty response from Gemini');
       }
+    } catch (error) {
+      lastError = error;
+      console.warn(`❌ Gemini API failed with key ${currentKeyIndex + 1}, model: ${modelName} - ${error.message}`);
+    }
 
       console.log(`✅ Gemini API succeeded with key ${currentKeyIndex + 1}, model: ${modelName}`);
       return text;
