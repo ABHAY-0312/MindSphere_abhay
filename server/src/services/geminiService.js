@@ -1078,18 +1078,17 @@ Course Topic: ${courseTopic}
 
 For each question:
 - Provide 4 distinct options (A, B, C, D).
-- IMPORTANT: Randomly vary the position of the correct answer (sometimes A, sometimes B, C, or D) to avoid predictable patterns. Do NOT always put the correct answer in the same position.
+- IMPORTANT: Randomly vary the position of the correct answer.
 - Specify the correct answer clearly.
-- For each option, provide a detailed explanation of why it is correct or incorrect.
-- Provide a specific explanation for why the correct answer is right, referencing the question and options.
-- Vary the difficulty level (easy, medium, hard).
+- Provide explanation for each option.
+- Provide explanation for correct answer.
+- Vary difficulty (easy, medium, hard).
 
 IMPORTANT:
-- Return ONLY valid JSON, wrapped in a single code block labeled json (i.e. \`\`\`json ... \`\`\`).
-- Do NOT include any explanation, markdown, or extra text before or after the code block.
-- All property names and string values must use double quotes.
+- Return ONLY valid JSON.
+- Do NOT include markdown or extra text.
 
-Return the response as a valid JSON object with this exact structure (do NOT include this as markdown, just as plain text inside the code block!):
+Return JSON in this format:
 {
   "quizQuestions": [
     {
@@ -1108,136 +1107,55 @@ Return the response as a valid JSON object with this exact structure (do NOT inc
     }
   ]
 }
-```
 `;
 
   try {
     console.log('🤖 Calling AI for additional quiz questions...');
 
-    // Try OpenRouter (GPT-3.5-Turbo) first for quiz, then fallback to Gemini
     let text;
+
     if (openRouterApiKey) {
       try {
         text = await makeOpenRouterCallChatQuiz(prompt);
-        console.log('✅ OpenRouter (GPT-3.5-Turbo) call completed');
+        console.log('✅ OpenRouter call completed');
       } catch (openRouterError) {
-        console.warn('⚠️ OpenRouter failed for quiz, falling back to Gemini:', openRouterError.message);
+        console.warn('⚠️ OpenRouter failed, using Gemini:', openRouterError.message);
         if (geminiApiKeys.length > 0) {
           text = await makeGeminiCallWithRotation(prompt);
-          console.log('✅ Gemini API call completed');
         } else {
           throw openRouterError;
         }
       }
     } else if (geminiApiKeys.length > 0) {
       text = await makeGeminiCallWithRotation(prompt);
-      console.log('✅ Gemini API call completed');
     } else {
-      throw new Error('No API keys available for quiz generation');
+      throw new Error('No API keys available');
     }
 
-    console.log('📝 Raw response length:', text.length, 'characters');
-
     if (!text || text.trim().length === 0) {
-      throw new Error('AI returned empty response text');
+      throw new Error('Empty AI response');
     }
 
     let parsed;
     try {
       parsed = parseAiJsonSafely(text);
     } catch (parseError) {
-      console.warn('⚠️ parseAiJsonSafely failed, trying jsonrepair...');
-      try {
-        const repaired = await tryJsonRepair(text);
-        parsed = JSON.parse(repaired);
-      } catch (repairError) {
-        console.error('❌ jsonrepair also failed:', repairError);
-        throw parseError;
-      }
+      const repaired = await tryJsonRepair(text);
+      parsed = JSON.parse(repaired);
     }
-    // Validate schema for quiz questions
-    try {
-      const valid = ajv.validate(quizEnvelopeSchema, parsed);
-      if (!valid) {
-        console.error('Quiz validation failed:', ajv.errors);
-        throw new Error('Quiz schema validation failed');
-      }
-    } catch (validationErr) {
-      console.error('Validation error for quiz questions:', validationErr);
-      throw validationErr;
+
+    const valid = ajv.validate(quizEnvelopeSchema, parsed);
+    if (!valid) {
+      console.error('Validation failed:', ajv.errors);
+      throw new Error('Invalid quiz format');
     }
-    console.log('✅ Successfully parsed and validated JSON. Questions count:', parsed.quizQuestions.length);
+
     return parsed;
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('❌ Error generating additional quiz questions:', errorMsg);
-    throw new Error(errorMsg || 'Failed to generate quiz questions. Please try again.');
-  }
-};
-
-// Generate quiz questions based on content
-export const generateQuizQuestions = async ({ title, source, content, fileName, url, timestamp }) => {
-  const prompt =
-    'Based on the following content, generate 4-6 quiz questions. Make them educational and relevant to the content.\n\n' +
-    'Content Title: ' + title + '\n' +
-    'Source Type: ' + source + '\n' +
-    (fileName ? 'File Name: ' + fileName + '\n' : '') +
-    (url ? 'URL: ' + url + '\n' : '') +
-    'Content: ' + content.substring(0, 3000) + (content.length > 3000 ? '...' : '') + '\n\n' +
-    'Please generate questions with the following format:\n' +
-    '{\n  "quizQuestions": [\n    {\n      "question": "Question text",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option A",\n      "explanation": "Why this is correct",\n      "difficulty": "easy|medium|hard"\n    }\n  ]\n}';
-
-  try {
-    const response = await makeAICall(prompt);
-    return response.quizQuestions || [];
-  } catch (error) {
-    console.error('Error generating quiz questions:', error);
+    console.error('❌ Error generating quiz:', error.message);
     throw error;
   }
 };
-
-// Generate flashcards based on content
-export const generateFlashcards = async ({ title, source, content, fileName, url }) => {
-  const prompt =
-    'Based on the following content, generate 6-8 educational flashcards with key concepts and terms.\n\n' +
-    'Content Title: ' + title + '\n' +
-    'Source Type: ' + source + '\n' +
-    (fileName ? 'File Name: ' + fileName + '\n' : '') +
-    (url ? 'URL: ' + url + '\n' : '') +
-    'Content: ' + content.substring(0, 3000) + (content.length > 3000 ? '...' : '') + '\n\n' +
-    'Please generate flashcards with the following format:\n' +
-    '{\n  "flashcards": [\n    {\n      "front": "Key concept or term",\n      "back": "Definition or explanation"\n    }\n  ]\n}';
-
-  try {
-    const response = await makeAICall(prompt);
-    return response.flashcards || [];
-  } catch (error) {
-    console.error('Error generating flashcards:', error);
-    throw error;
-  }
-};
-
-// Generate lesson structure based on content
-export const generateLessons = async ({ title, source, content, fileName, url }) => {
-  const prompt = `Based on the following content, generate a structured lesson plan with 3-5 key learning modules.
-
-Content Title: ${title}
-Source Type: ${source}
-${fileName ? `File Name: ${fileName}` : ''}
-${url ? `URL: ${url}` : ''}
-
-Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
-
-Please generate lessons with the following format:
-{
-  "lessons": [
-    {
-      "title": "Lesson title",
-      "content": "Lesson content and key points",
-      "order": 1
-    }
-  ]
-}`;
 
   try {
     const response = await makeAICall(prompt);
