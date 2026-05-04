@@ -358,13 +358,105 @@ const makeGeminiCallWithRotation = async (prompt, maxRetries = 2) => {
   throw lastError || new Error('All Gemini API attempts failed');
 };
 /**
+ * Make OpenRouter API call with GPT-3.5-Turbo primary, then fallback to other models and keys
+ * Used for Chat and Quiz (lightweight tasks)
+ */
+const makeOpenRouterCallChatQuiz = async (prompt, maxRetries = 2) => {
+  // Only use GPT-3.5-Turbo (cheapest, fastest)
+  const models = ['openai/gpt-3.5-turbo'];
+  let lastError;
+
+  // Try current OpenRouter key first
+  if (openRouterApiKey) {
+    for (const model of models) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`🔄 OpenRouter (GPT-3.5-Turbo) attempt ${attempt}/${maxRetries}`);
+
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${openRouterApiKey}`,
+              'HTTP-Referer': process.env.SITE_URL || 'http://localhost:5173',
+              'X-Title': process.env.SITE_NAME || 'MindSphere AI',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                {
+                  role: 'user',
+                  content: prompt,
+                },
+              ],
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.error?.message || response.statusText;
+
+            // Check for credit limit errors
+            const isCreditError = errorMessage.toLowerCase().includes('credit') ||
+              errorMessage.toLowerCase().includes('insufficient') ||
+              errorMessage.toLowerCase().includes('quota') ||
+              response.status === 402;
+
+            if (isCreditError) {
+              console.warn(`💸 OpenRouter credit limit: ${errorMessage}`);
+              throw new Error(`Credit limit reached: ${errorMessage}`);
+            }
+
+            throw new Error(`OpenRouter error: ${response.status} - ${errorMessage}`);
+          }
+
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content;
+
+          if (!content) {
+            throw new Error('No content in OpenRouter response');
+          }
+
+          console.log(`✅ OpenRouter (GPT-3.5-Turbo) succeeded`);
+          return content;
+        } catch (error) {
+          lastError = error;
+          console.warn(`❌ OpenRouter attempt ${attempt} failed: ${error.message}`);
+
+          const isRetryable = error.message.includes('503') || error.message.includes('429') || error.message.includes('500');
+          if (!isRetryable || attempt === maxRetries) {
+            break;
+          }
+
+          const delayMs = Math.pow(2, attempt - 1) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+  }
+
+  // If OpenRouter fails, try Gemini as fallback
+  console.log('📝 OpenRouter failed, falling back to Gemini for chat/quiz...');
+  if (geminiApiKeys.length > 0) {
+    try {
+      return await makeGeminiCallWithRotation(prompt, 1);
+    } catch (geminiError) {
+      console.error('❌ Gemini fallback also failed:', geminiError.message);
+      throw geminiError;
+    }
+  }
+
+  throw lastError || new Error('All chat/quiz API services failed');
+};
+
+/**
  * Helper function to make OpenRouter API calls with model fallback
  * @param {string} prompt - The prompt to send to the model
  * @param {number} maxRetries - Maximum number of retries
  * @returns {Promise<string>} Response text from the AI model
  */
 const makeOpenRouterCall = async (prompt, modelOverride = null, maxRetries = 3) => {
-  const models = modelOverride ? [modelOverride] : ['openai/gpt-4o', 'openai/gpt-3.5-turbo']; // Fallback order or specific model
+  const models = modelOverride ? [modelOverride] : ['openai/gpt-3.5-turbo', 'openai/gpt-4o']; // Use GPT-3.5-turbo first (cheaper)
   let lastError;
 
   for (const model of models) {
@@ -402,8 +494,8 @@ const makeOpenRouterCall = async (prompt, modelOverride = null, maxRetries = 3) 
             errorMessage.toLowerCase().includes('limit') ||
             response.status === 402;
 
-          if (isCreditError && model === 'openai/gpt-4o') {
-            console.warn(`💸 Credit limit reached for GPT-4o, switching to GPT-3.5 Turbo`);
+          if (isCreditError && model === 'openai/gpt-3.5-turbo') {
+            console.warn(`💸 Credit limit reached for GPT-3.5-turbo, switching to GPT-4o`);
             break; // Break inner loop to try next model
           }
 
@@ -422,14 +514,14 @@ const makeOpenRouterCall = async (prompt, modelOverride = null, maxRetries = 3) 
       } catch (error) {
         lastError = error;
 
-        // Check if it's a credit error for GPT-4o
+        // Check if it's a credit error for GPT-3.5-turbo
         if (error.message.toLowerCase().includes('credit') ||
           error.message.toLowerCase().includes('insufficient') ||
           error.message.toLowerCase().includes('quota') ||
           error.message.toLowerCase().includes('limit')) {
-          if (model === 'openai/gpt-4o') {
-            console.warn(`💸 Credit limit detected for GPT-4o: ${error.message}`);
-            break; // Break to try GPT-3.5 Turbo
+          if (model === 'openai/gpt-3.5-turbo') {
+            console.warn(`💸 Credit limit detected for GPT-3.5-turbo: ${error.message}`);
+            break; // Break to try GPT-4o
           }
         }
 
@@ -492,10 +584,18 @@ export const initializeGemini = () => {
   // Initialize Gemini API keys (support multiple formats)
   geminiApiKeys = [];
 
+  // Debug logging
+  console.log('🔍 Checking environment variables...');
+  console.log('GEMINI_API_KEY present:', !!process.env.GEMINI_API_KEY);
+  console.log('GEMINI_API_KEYS present:', !!process.env.GEMINI_API_KEYS);
+  console.log('OPENROUTER_API_KEY present:', !!process.env.OPENROUTER_API_KEY);
+  console.log('OPENAI_API_KEY present:', !!process.env.OPENAI_API_KEY);
+
   // Method 1: Comma-separated keys
   const geminiApiKeysEnv = process.env.GEMINI_API_KEYS;
   if (geminiApiKeysEnv) {
     geminiApiKeys = geminiApiKeysEnv.split(',').map(key => key.trim().replace(/"/g, '')).filter(key => key.length > 0);
+    console.log(`✅ Loaded ${geminiApiKeys.length} key(s) from GEMINI_API_KEYS`);
   }
 
   // Method 2: Individual key environment variables
@@ -507,11 +607,17 @@ export const initializeGemini = () => {
     process.env.GEMINI_API_KEY_5
   ].filter(key => key && key.trim().length > 0).map(key => key.trim().replace(/"/g, ''));
 
+  if (individualKeys.length > 0) {
+    console.log(`✅ Loaded ${individualKeys.length} individual Gemini key(s)`);
+  }
+
   // Combine both methods (remove duplicates)
   geminiApiKeys = [...new Set([...geminiApiKeys, ...individualKeys])];
 
   if (geminiApiKeys.length > 0) {
-    console.log(`✅ Initialized ${geminiApiKeys.length} Gemini API key(s)`);
+    console.log(`✅ Total Gemini API keys initialized: ${geminiApiKeys.length}`);
+  } else {
+    console.warn('⚠️ No Gemini API keys found in environment');
   }
 
   // Initialize OpenRouter API keys (support multiple keys)
@@ -524,7 +630,9 @@ export const initializeGemini = () => {
 
   if (openRouterKeys.length > 0) {
     openRouterApiKey = openRouterKeys[0]; // Use first available OpenRouter key
-    console.log(`✅ Initialized ${openRouterKeys.length} OpenRouter API key(s) (using first one)`);
+    console.log(`✅ OpenRouter initialized with ${openRouterKeys.length} key(s)`);
+  } else {
+    console.warn('⚠️ No OpenRouter API keys found in environment');
   }
 
   // Initialize Gemini models (support multiple models for fallback)
@@ -533,17 +641,12 @@ export const initializeGemini = () => {
   console.log(`✅ Initialized ${geminiModels.length} Gemini model(s): ${geminiModels.join(', ')}`);
 
   if (geminiApiKeys.length === 0 && !openRouterApiKey) {
-    console.warn('⚠️ No API keys configured. AI features will be disabled.');
+    console.warn('⚠️ No API keys configured. AI features will be disabled. Using fallback responses only.');
     return false;
   }
 
-  try {
-    console.log(`✅ AI system initialized with ${geminiApiKeys.length} Gemini key(s), ${geminiModels.length} model(s), and ${openRouterApiKey ? 'OpenRouter fallback' : 'no OpenRouter fallback'}`);
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to initialize AI system:', error.message);
-    return false;
-  }
+  console.log(`✅ AI system initialized with ${geminiApiKeys.length} Gemini key(s), ${geminiModels.length} model(s), and ${openRouterApiKey ? 'OpenRouter fallback' : 'no OpenRouter fallback'}`);
+  return true;
 };
 
 export const generateCourseContent = async (title, sourceType, source) => {
@@ -621,8 +724,8 @@ Return the response as a valid JSON object with this exact structure:
   ],
   \"notes\": [
     {
-      \"title\": \"string\", // headline for the note
-      \"summary\": \"string\", // crisp summary for the note (4-5 bullet points)
+      \"title\": \"string\",
+      \"summary\": [\"string\"],
       \"topics\": [\"string\"]
     }
   ]
@@ -650,7 +753,8 @@ Generate a detailed course with:
   - Randomly vary the position of the correct answer (sometimes A, sometimes B, C, or D) to avoid predictable patterns
   - Options (exactly 4)
   - Correct answer
-  - Explanation
+  - Explanations for each option (A, B, C, D)
+  - Explanation for why the correct answer is correct
   - Difficulty (easy, medium, or hard)
 7. 8-12 flashcards with:
    - Front (question or term)
@@ -658,56 +762,65 @@ Generate a detailed course with:
    - Difficulty level
 8. 3-5 comprehensive notes with:
    - Title
-   - Content (detailed explanation)
+   - Summary (bullet points)
    - Related topics
 
+IMPORTANT: Return ONLY valid JSON wrapped in a single fenced code block labelled "json" (i.e. \`\`\`json ... \`\`\`).
+
 Return the response as a valid JSON object with this exact structure:
+\`\`\`json
 {
-  \"summary\": \"string\",
-  \"category\": \"string\",
-  \"level\": \"Beginner|Intermediate|Advanced\",
-  \"topics\": [\"string\"],
-  \"lessons\": [
+  "summary": "string",
+  "category": "string",
+  "level": "Beginner|Intermediate|Advanced",
+  "topics": ["string"],
+  "lessons": [
     {
-      \"title\": \"string\",
-      \"description\": \"string\",
-      \"duration\": \"string\",
-      \"content\": \"string\",
-      \"order\": number
+      "title": "string",
+      "description": "string",
+      "duration": "string",
+      "content": "string",
+      "order": number
     }
   ],
-  \"quizQuestions\": [
-    {
-      \"type\": \"multiple-choice|true-false|fill-blank\",
-      \"question\": \"string\",
-      \"options\": [\"string\"] or null,
-      \"correctAnswer\": \"string\",
-      \"explanation\": \"string\",
-      \"difficulty\": \"easy|medium|hard\"
-    }
-  ],
-  \"flashcards\": [
-    {
-      \"front\": \"string\",
-      \"back\": \"string\",
-      \"difficulty\": \"easy|medium|hard\"
-    }
-  ],
-  \"notes\": [
-    {
-      \"title\": \"string\",
-      \"content\": \"string\",
-      \"topics\": [\"string\"]
-    }
-  ]
+  "quizQuestions": [
     {
       "type": "multiple-choice",
       "question": "string",
       "options": ["string", "string", "string", "string"],
       "correctAnswer": "string",
-      "explanation": "string",
+      "explanations": {
+        "A": "string",
+        "B": "string",
+        "C": "string",
+        "D": "string"
+      },
+      "correctExplanation": "string",
       "difficulty": "easy|medium|hard"
     }
+  ],
+  "flashcards": [
+    {
+      "front": "string",
+      "back": "string",
+      "difficulty": "easy|medium|hard"
+    }
+  ],
+  "notes": [
+    {
+      "title": "string",
+      "summary": ["string"],
+      "topics": ["string"]
+    }
+  ]
+}
+\`\`\``;
+  }
+
+  try {
+    let text;
+    if (geminiApiKeys.length > 0) {
+      text = await makeGeminiCallWithRotation(prompt);
     } else {
       text = await makeOpenRouterCall(prompt);
     }
@@ -731,19 +844,47 @@ Return the response as a valid JSON object with this exact structure:
     } catch (parseError) {
       console.error('Failed to parse/validate AI response in generateCourseContent:', parseError);
       console.error('Response preview (first 500 chars):', (text || '').substring(0, 500));
-      // Return a fallback response structure
+      // Return a fallback response structure with multiple items
       return {
         summary: "A comprehensive course generated from the content provided.",
         category: "General",
         level: "Intermediate",
-        topics: ["Learning", "Education"],
+        topics: ["Learning", "Education", "Skill Development"],
         lessons: [
           {
             title: "Introduction",
             description: "Introduction to the course content",
-            duration: "1 hour",
+            duration: "15 min",
             content: "This lesson provides an overview of the main topics covered.",
             order: 1
+          },
+          {
+            title: "Core Concepts",
+            description: "Explore the core concepts covered in this course",
+            duration: "20 min",
+            content: "This lesson covers the fundamental concepts and principles you need to understand.",
+            order: 2
+          },
+          {
+            title: "Advanced Topics",
+            description: "Dive deeper into advanced applications",
+            duration: "25 min",
+            content: "This lesson explores more advanced topics and real-world applications.",
+            order: 3
+          },
+          {
+            title: "Practical Examples",
+            description: "Learn through hands-on examples",
+            duration: "20 min",
+            content: "This lesson provides practical examples and case studies to reinforce your learning.",
+            order: 4
+          },
+          {
+            title: "Summary and Next Steps",
+            description: "Review key takeaways and plan your next learning steps",
+            duration: "10 min",
+            content: "This final lesson summarizes the key concepts and guides you toward the next level of learning.",
+            order: 5
           }
         ],
         quizQuestions: [
@@ -754,6 +895,38 @@ Return the response as a valid JSON object with this exact structure:
             correctAnswer: "D",
             correctExplanation: "This course focuses on comprehensive learning including concepts, testing, and skill building.",
             difficulty: "easy"
+          },
+          {
+            type: "multiple-choice",
+            question: "Which of the following is a key benefit of this course?",
+            options: ["Improved understanding", "Better retention", "Practical skills", "All of the above"],
+            correctAnswer: "D",
+            correctExplanation: "The course is designed to improve your understanding, enhance retention through practice, and develop practical skills.",
+            difficulty: "medium"
+          },
+          {
+            type: "multiple-choice",
+            question: "What should you do after completing this course?",
+            options: ["Review the material", "Practice with examples", "Apply knowledge to real scenarios", "All of the above"],
+            correctAnswer: "D",
+            correctExplanation: "To maximize learning, you should review the material, practice with examples, and apply your knowledge to real-world scenarios.",
+            difficulty: "medium"
+          },
+          {
+            type: "multiple-choice",
+            question: "How can you improve your learning outcomes?",
+            options: ["Read once", "Take notes actively", "Practice regularly", "All of the above"],
+            correctAnswer: "D",
+            correctExplanation: "Active learning through note-taking and regular practice significantly improves retention and understanding.",
+            difficulty: "hard"
+          },
+          {
+            type: "multiple-choice",
+            question: "What is essential for mastery of the topics covered?",
+            options: ["Understanding basics", "Consistent practice", "Applying to real projects", "All of the above"],
+            correctAnswer: "D",
+            correctExplanation: "True mastery requires understanding fundamentals, consistent practice, and real-world application of knowledge.",
+            difficulty: "hard"
           }
         ],
         flashcards: [
@@ -761,13 +934,63 @@ Return the response as a valid JSON object with this exact structure:
             front: "Key Learning Concept",
             back: "Important information from the course content",
             difficulty: "easy"
+          },
+          {
+            front: "What are the core principles?",
+            back: "The core principles form the foundation of understanding in this subject area",
+            difficulty: "easy"
+          },
+          {
+            front: "How to apply theory to practice?",
+            back: "Theory should be applied through hands-on examples and real-world projects",
+            difficulty: "medium"
+          },
+          {
+            front: "What advanced techniques exist?",
+            back: "Advanced techniques build upon core concepts and enable more complex problem-solving",
+            difficulty: "medium"
+          },
+          {
+            front: "How to measure progress?",
+            back: "Progress can be measured through quizzes, practical projects, and self-assessment",
+            difficulty: "medium"
+          },
+          {
+            front: "What are common mistakes?",
+            back: "Common mistakes include skipping basics, insufficient practice, and not applying knowledge practically",
+            difficulty: "hard"
+          },
+          {
+            front: "How to maintain knowledge?",
+            back: "Regular review, practical application, and teaching others helps maintain and deepen knowledge",
+            difficulty: "hard"
+          },
+          {
+            front: "What is the next level of learning?",
+            back: "The next level involves specialization, advanced applications, and contributing to the field",
+            difficulty: "hard"
           }
         ],
         notes: [
           {
             title: "Course Overview",
-            summary: ["Introduction to course topics", "Key concepts to learn"],
+            summary: ["Introduction to course topics", "Key concepts to learn", "Learning objectives"],
             topics: ["Learning", "Education"]
+          },
+          {
+            title: "Fundamental Concepts",
+            summary: ["Core principles of the subject", "Basic terminology and definitions", "Foundation for advanced topics"],
+            topics: ["Fundamentals"]
+          },
+          {
+            title: "Practical Applications",
+            summary: ["Real-world use cases", "Implementation strategies", "Best practices and tips"],
+            topics: ["Application", "Practice"]
+          },
+          {
+            title: "Advanced Techniques",
+            summary: ["Beyond the basics", "Complex scenarios", "Optimization and efficiency"],
+            topics: ["Advanced", "Optimization"]
           }
         ]
       };
@@ -778,9 +1001,38 @@ Return the response as a valid JSON object with this exact structure:
   }
 };
 
+const generateFallbackChatResponse = (message, coursesContext) => {
+  const lowercaseMessage = message.toLowerCase();
+  
+  if (lowercaseMessage.includes('course') || lowercaseMessage.includes('lesson') || lowercaseMessage.includes('topic')) {
+    if (coursesContext.length > 0) {
+      const courseNames = coursesContext.map(c => c.title).join(', ');
+      return `I can see you're studying: ${courseNames}. Check out the course materials, flashcards, and quizzes in your dashboard!`;
+    }
+    return 'You can explore courses in the catalog. Each course includes lessons, flashcards, and quizzes to help you learn effectively.';
+  }
+  
+  if (lowercaseMessage.includes('study') || lowercaseMessage.includes('schedule') || lowercaseMessage.includes('plan')) {
+    return 'A good study plan: 1) Review materials regularly, 2) Practice flashcards daily, 3) Take quizzes to assess understanding, 4) Take breaks. Dedicate 30 minutes daily per course.';
+  }
+  
+  if (lowercaseMessage.includes('explain') || lowercaseMessage.includes('understand') || lowercaseMessage.includes('what is')) {
+    return 'Review the course materials and notes section. Flashcards help with key concepts. Check your course dashboard for detailed explanations.';
+  }
+  
+  if (lowercaseMessage.includes('practice') || lowercaseMessage.includes('quiz') || lowercaseMessage.includes('exercise')) {
+    return 'Use the Quiz section after each lesson to test your knowledge. Flashcards are perfect for daily review. Practice regularly to improve.';
+  }
+  
+  return 'I can help with your courses! Ask about study strategies, practice exercises, or specific concepts. Check your dashboard for more resources.';
+};
+
 export const generateChatResponse = async (message, coursesContext) => {
-  if (geminiApiKeys.length === 0 && !openRouterApiKey) {
-    throw new Error('AI system is not initialized. Please check your API keys.');
+  const hasApiKeys = geminiApiKeys.length > 0 || !!openRouterApiKey;
+  
+  if (!hasApiKeys) {
+    console.warn('⚠️ No AI API keys configured. Using fallback response.');
+    return generateFallbackChatResponse(message, coursesContext);
   }
 
   const contextInfo = coursesContext.length > 0
@@ -798,15 +1050,11 @@ IMPORTANT: Provide a SHORT, DIRECT answer (2-4 sentences max).
 - Be clear and to the point`;
 
   try {
-    if (geminiApiKeys.length > 0) {
-      return await makeGeminiCallWithRotation(prompt);
-    }
-
-    // Use OpenRouter with model fallback when Gemini is unavailable
-    return await makeOpenRouterCall(prompt);
+    // Use GPT-3.5-Turbo for chat (cheapest, fast)
+    return await makeOpenRouterCallChatQuiz(prompt);
   } catch (error) {
     console.error('Error generating chat response:', error);
-    throw new Error('Failed to generate response. Please try again.');
+    return generateFallbackChatResponse(message, coursesContext);
   }
 };
 
@@ -851,14 +1099,26 @@ Return the response as a valid JSON object with this exact structure:
   try {
     console.log('🤖 Calling AI for additional quiz questions...');
 
-    // Try Gemini first, then fallback to OpenRouter
+    // Try OpenRouter (GPT-3.5-Turbo) first for quiz, then fallback to Gemini
     let text;
-    if (geminiApiKeys.length > 0) {
+    if (openRouterApiKey) {
+      try {
+        text = await makeOpenRouterCallChatQuiz(prompt);
+        console.log('✅ OpenRouter (GPT-3.5-Turbo) call completed');
+      } catch (openRouterError) {
+        console.warn('⚠️ OpenRouter failed for quiz, falling back to Gemini:', openRouterError.message);
+        if (geminiApiKeys.length > 0) {
+          text = await makeGeminiCallWithRotation(prompt);
+          console.log('✅ Gemini API call completed');
+        } else {
+          throw openRouterError;
+        }
+      }
+    } else if (geminiApiKeys.length > 0) {
       text = await makeGeminiCallWithRotation(prompt);
       console.log('✅ Gemini API call completed');
     } else {
-      text = await makeOpenRouterCall(prompt);
-      console.log('✅ OpenRouter API call completed');
+      throw new Error('No API keys available for quiz generation');
     }
 
     console.log('📝 Raw response length:', text.length, 'characters');

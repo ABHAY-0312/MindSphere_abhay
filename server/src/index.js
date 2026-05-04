@@ -14,7 +14,13 @@ import flashcardsRoutes from './routes/flashcards.js';
 import lessonsRoutes from './routes/lessons.js';
 import youtubeTestRoutes from './routes/youtubeTest.js';
 
+// Load environment variables from .env file (if exists)
+// In Vercel, environment variables are already set in the deployment settings
 dotenv.config();
+
+console.log('🚀 Starting MindSphere Server...');
+console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`🔑 API Keys will be initialized on startup...\n`);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,8 +70,13 @@ app.use((err, req, res, next) => {
 
 const startServer = async () => {
   try {
+    console.log('📚 Connecting to database...');
     await connectDB();
-    initializeGemini();
+    console.log('✅ Database connected\n');
+
+    console.log('🔐 Initializing AI system...');
+    const aiInitialized = initializeGemini();
+    console.log(`${aiInitialized ? '✅ AI system ready' : '⚠️ AI system in fallback mode'}\n`);
     
     app.listen(PORT, () => {
       console.log(`\n🚀 Server listening on port ${PORT}`);
@@ -73,7 +84,7 @@ const startServer = async () => {
       console.log(`🔍 Health check: http://localhost:${PORT}/api/health\n`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };

@@ -32,7 +32,6 @@ router.post('/', async (req, res) => {
     
     // Generate AI response
     const reply = await generateChatResponse(message, coursesContext);
-    
     res.json({ reply });
   } catch (error) {
     console.error('Chat error:', error);
