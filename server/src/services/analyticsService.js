@@ -159,14 +159,22 @@ export const calculateCourseProgress = (courses) => {
       // Use the course's progress field or calculate from lessons
       const progress = course.progress !== undefined ? course.progress :
         (totalLessons > 0 ? Math.round((lessonsCompleted / totalLessons) * 100) : 0);
-      // Calculate average quiz score from quizzes array
+      // Calculate average quiz score from all quiz attempts (scores[]), with backward compatibility.
       const quizzes = course.quizzes || [];
-      const completedQuizzes = quizzes.filter(q => q.completedAt && q.score !== undefined);
-      const averageQuizScore = completedQuizzes.length > 0
-        ? Math.round(completedQuizzes.reduce((sum, q) => sum + (q.score || 0), 0) / completedQuizzes.length)
+      const allScores = quizzes.flatMap(q => {
+        if (Array.isArray(q.scores) && q.scores.length > 0) {
+          return q.scores.map(s => s.score).filter(s => typeof s === 'number');
+        }
+        if (typeof q.score === 'number' && q.completedAt) {
+          return [q.score];
+        }
+        return [];
+      });
+      const averageQuizScore = allScores.length > 0
+        ? Math.round(allScores.reduce((sum, score) => sum + score, 0) / allScores.length)
         : 0;
       // Estimate time spent
-      const timeSpent = lessonsCompleted * 30 + completedQuizzes.length * 15; // in minutes
+      const timeSpent = lessonsCompleted * 30 + allScores.length * 15; // in minutes
       // Determine status
       let status = 'Not Started';
       if (progress > 0 && progress < 100) status = 'In Progress';
@@ -177,7 +185,7 @@ export const calculateCourseProgress = (courses) => {
         progress,
         lessonsCompleted,
         totalLessons,
-        quizzesTaken: completedQuizzes.length,
+        quizzesTaken: allScores.length,
         averageQuizScore,
         timeSpent: Math.round(timeSpent),
         enrolledDate: course.createdAt ? getDateString(new Date(course.createdAt)) : getDateString(),
