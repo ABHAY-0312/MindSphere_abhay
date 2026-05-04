@@ -328,8 +328,7 @@ const makeGeminiCallWithRotation = async (prompt, maxRetries = 2) => {
       }
 
       const text = response.text();
-      if (!text || text.trim().length === 0) {
-        throw new Error('Empty response from Gemini');
+
       }
 
       console.log(`✅ Gemini API succeeded with key ${currentKeyIndex + 1}, model: ${modelName}`);
@@ -1136,56 +1135,17 @@ Return JSON in this format:
       throw new Error('Empty AI response');
     }
 
-    let parsed;
+  let parsed;
     try {
       parsed = parseAiJsonSafely(text);
     } catch (parseError) {
       const repaired = await tryJsonRepair(text);
       parsed = JSON.parse(repaired);
     }
-
-    const valid = ajv.validate(quizEnvelopeSchema, parsed);
-    if (!valid) {
-      console.error('Validation failed:', ajv.errors);
-      throw new Error('Invalid quiz format');
-    }
-
-    return parsed;
-  } catch (error) {
-    console.error('❌ Error generating quiz:', error.message);
-    throw error;
+    return parsed.quizQuestions || [];
   }
 };
 
-  try {
-    const response = await makeAICall(prompt);
-    return response.lessons || [];
-  } catch (error) {
-    console.error('Error generating lessons:', error);
-    throw error;
-  }
-};
 
-// Helper function to make AI calls with the existing rotation system
-const makeAICall = async (prompt) => {
-  try {
-    const text = await makeGeminiCallWithRotation(prompt);
 
-    try {
-      const parsed = parseAiJsonSafely(text);
-      return parsed;
-    } catch (parseError) {
-      console.warn('⚠️ parseAiJsonSafely failed, trying jsonrepair...');
-      try {
-        const repaired = await tryJsonRepair(text);
-        return JSON.parse(repaired);
-      } catch (repairError) {
-        console.error('❌ jsonrepair also failed:', repairError);
-        throw parseError;
-      }
-    }
-  } catch (error) {
-    console.error('Error in makeAICall:', error);
-    throw error;
-  }
-};
+
