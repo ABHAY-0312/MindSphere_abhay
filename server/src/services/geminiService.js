@@ -1205,14 +1205,8 @@ export const generateFlashcards = async ({ title, source, content, fileName, url
     (fileName ? 'File Name: ' + fileName + '\n' : '') +
     (url ? 'URL: ' + url + '\n' : '') +
     'Content: ' + content.substring(0, 3000) + (content.length > 3000 ? '...' : '') + '\n\n' +
-    'Please generate flashcards with the following format:\n{ ';
-  "flashcards": [
-    {
-      "front": "Key concept or term",
-      "back": "Definition or explanation"
-    }
-  ]
-}`;
+    'Please generate flashcards with the following format:\n' +
+    '{\n  "flashcards": [\n    {\n      "front": "Key concept or term",\n      "back": "Definition or explanation"\n    }\n  ]\n}';
 
   try {
     const response = await makeAICall(prompt);
@@ -1264,15 +1258,11 @@ const makeAICall = async (prompt) => {
       return parsed;
     } catch (parseError) {
       console.warn('⚠️ parseAiJsonSafely failed, trying jsonrepair...');
-      if (typeof jsonRepair === 'function') {
-        try {
-          const repaired = jsonRepair(text);
-          parsed = JSON.parse(repaired);
-        } catch (repairError) {
-          console.error('❌ jsonrepair also failed:', repairError);
-          throw parseError;
-        }
-      } else {
+      try {
+        const repaired = await tryJsonRepair(text);
+        return JSON.parse(repaired);
+      } catch (repairError) {
+        console.error('❌ jsonrepair also failed:', repairError);
         throw parseError;
       }
     }
