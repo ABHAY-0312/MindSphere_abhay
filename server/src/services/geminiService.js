@@ -5,30 +5,22 @@ import JSON5 from 'json5';
 import Ajv from 'ajv';
 import { createRequire } from 'module';
 
-
-// Dynamically import jsonrepair for ESM compatibility
+// Load jsonrepair via createRequire to support CommonJS/ESM differences
+const require = createRequire(import.meta.url);
 let jsonRepair = null;
-const loadJsonRepair = async () => {
-  if (jsonRepair) return jsonRepair;
-  try {
-    const mod = await import('jsonrepair');
-    // Support both default and named export
-    jsonRepair = mod.default || mod.jsonrepair || mod;
-    return jsonRepair;
-  } catch (err) {
-    jsonRepair = null;
-    return null;
-  }
-};
+try {
+  jsonRepair = require('jsonrepair');
+} catch (err) {
+  jsonRepair = null;
+}
 
 // Helper to attempt repairing JSON-like text using whatever form the module provides
-const tryJsonRepair = async (candidate) => {
-  const repairFn = await loadJsonRepair();
-  if (!repairFn) return null;
+const tryJsonRepair = (candidate) => {
+  if (!jsonRepair) return null;
   try {
-    if (typeof repairFn === 'function') return repairFn(candidate);
-    if (repairFn && typeof repairFn.repair === 'function') return repairFn.repair(candidate);
-    if (repairFn && repairFn.default && typeof repairFn.default === 'function') return repairFn.default(candidate);
+    if (typeof jsonRepair === 'function') return jsonRepair(candidate);
+    if (jsonRepair && typeof jsonRepair.repair === 'function') return jsonRepair.repair(candidate);
+    if (jsonRepair && jsonRepair.default && typeof jsonRepair.default === 'function') return jsonRepair.default(candidate);
     return null;
   } catch (e) {
     return null;
@@ -331,10 +323,6 @@ const makeGeminiCallWithRotation = async (prompt, maxRetries = 2) => {
       if (!text || text.trim().length === 0) {
         throw new Error('Empty response from Gemini');
       }
-    } catch (error) {
-      lastError = error;
-      console.warn(`❌ Gemini API failed with key ${currentKeyIndex + 1}, model: ${modelName} - ${error.message}`);
-    }
 
       console.log(`✅ Gemini API succeeded with key ${currentKeyIndex + 1}, model: ${modelName}`);
       return text;
@@ -1082,75 +1070,214 @@ Course Topic: ${courseTopic}
 
 For each question:
 - Provide 4 distinct options (A, B, C, D).
-- IMPORTANT: Randomly vary the position of the correct answer.
+- IMPORTANT: Randomly vary the position of the correct answer (sometimes A, sometimes B, C, or D) to avoid predictable patterns. Do NOT always put the correct answer in the same position.
 - Specify the correct answer clearly.
-- Provide explanation for each option.
-- Provide explanation for correct answer.
-- Vary difficulty (easy, medium, hard).
+- For each option, provide a detailed explanation of why it is correct or incorrect.
+- Provide a specific explanation for why the correct answer is right, referencing the question and options.
+- Vary the difficulty level (easy, medium, hard).
 
-IMPORTANT:
-- Return ONLY valid JSON.
-- Do NOT include markdown or extra text.
-
-Return JSON in this format:
+Return the response as a valid JSON object with this exact structure:
 {
-  "quizQuestions": [
+  \"quizQuestions\": [
     {
-      "type": "multiple-choice",
-      "question": "string",
-      "options": ["string", "string", "string", "string"],
-      "correctAnswer": "string",
-      "explanations": {
-        "A": "string",
-        "B": "string",
-        "C": "string",
-        "D": "string"
+      \"type\": \"multiple-choice\",
+      \"question\": \"string\",
+      \"options\": [\"string\", \"string\", \"string\", \"string\"],
+      \"correctAnswer\": \"string\",
+      \"explanations\": {
+        \"A\": \"string\",
+        \"B\": \"string\",
+        \"C\": \"string\",
+        \"D\": \"string\"
       },
-      "correctExplanation": "string",
-      "difficulty": "easy|medium|hard"
+      \"correctExplanation\": \"string\",
+      \"difficulty\": \"easy|medium|hard\"
     }
   ]
-}
-`;
+}`;
 
   try {
     console.log('🤖 Calling AI for additional quiz questions...');
 
+    // Try OpenRouter (GPT-3.5-Turbo) first for quiz, then fallback to Gemini
     let text;
-
     if (openRouterApiKey) {
       try {
         text = await makeOpenRouterCallChatQuiz(prompt);
-        console.log('✅ OpenRouter call completed');
+        console.log('✅ OpenRouter (GPT-3.5-Turbo) call completed');
       } catch (openRouterError) {
-        console.warn('⚠️ OpenRouter failed, using Gemini:', openRouterError.message);
+        console.warn('⚠️ OpenRouter failed for quiz, falling back to Gemini:', openRouterError.message);
         if (geminiApiKeys.length > 0) {
           text = await makeGeminiCallWithRotation(prompt);
+          console.log('✅ Gemini API call completed');
         } else {
           throw openRouterError;
         }
       }
     } else if (geminiApiKeys.length > 0) {
       text = await makeGeminiCallWithRotation(prompt);
+      console.log('✅ Gemini API call completed');
     } else {
-      throw new Error('No API keys available');
+      throw new Error('No API keys available for quiz generation');
     }
+
+    console.log('📝 Raw response length:', text.length, 'characters');
 
     if (!text || text.trim().length === 0) {
-      throw new Error('Empty AI response');
+      throw new Error('AI returned empty response text');
     }
 
-  let parsed;
     try {
-      parsed = parseAiJsonSafely(text);
-    } catch (parseError) {
-      const repaired = await tryJsonRepair(text);
-      parsed = JSON.parse(repaired);
+      const parsed = parseAiJsonSafely(text);
+      // Validate schema for quiz questions
+      try {
+        const valid = ajv.validate(quizEnvelopeSchema, parsed);
+        if (!valid) {
+          console.error('Quiz validation failed:', ajv.errors);
+          throw new Error('Quiz schema validation failed');
+        }
+      } catch (validationErr) {
+        console.error('Validation error for quiz questions:', validationErr);
+        throw validationErr;
+      }
+
+      console.log('✅ Successfully parsed and validated JSON. Questions count:', parsed.quizQuestions.length);
+      return parsed;
+    } catch (err) {
+      console.error('❌ Failed to parse AI response for quiz questions:', err);
+      console.error('Response preview (first 500 chars):', (text || '').substring(0, 500));
+      throw new Error('Failed to parse AI response for quiz questions');
     }
-    return parsed.quizQuestions || [];
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error('❌ Error generating additional quiz questions:', errorMsg);
+    throw new Error(errorMsg || 'Failed to generate quiz questions. Please try again.');
   }
 };
 
+// Generate quiz questions based on content
+export const generateQuizQuestions = async ({ title, source, content, fileName, url, timestamp }) => {
+  const prompt = `Based on the following content, generate 4-6 quiz questions. Make them educational and relevant to the content.
 
+Content Title: ${title}
+Source Type: ${source}
+${fileName ? `File Name: ${fileName}` : ''}
+${url ? `URL: ${url}` : ''}
 
+Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
 
+Please generate questions with the following format:
+{
+  "quizQuestions": [
+    {
+      "question": "Question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": "Option A",
+      "explanation": "Why this is correct",
+      "difficulty": "easy|medium|hard"
+    }
+  ]
+}`;
+
+  try {
+    const response = await makeAICall(prompt);
+    return response.quizQuestions || [];
+  } catch (error) {
+    console.error('Error generating quiz questions:', error);
+    throw error;
+  }
+};
+
+// Generate flashcards based on content
+export const generateFlashcards = async ({ title, source, content, fileName, url }) => {
+  const prompt = `Based on the following content, generate 6-8 educational flashcards with key concepts and terms.
+
+Content Title: ${title}
+Source Type: ${source}
+${fileName ? `File Name: ${fileName}` : ''}
+${url ? `URL: ${url}` : ''}
+
+Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
+
+Please generate flashcards with the following format:
+{
+  "flashcards": [
+    {
+      "front": "Key concept or term",
+      "back": "Definition or explanation"
+    }
+  ]
+}`;
+
+  try {
+    const response = await makeAICall(prompt);
+    return response.flashcards || [];
+  } catch (error) {
+    console.error('Error generating flashcards:', error);
+    throw error;
+  }
+};
+
+// Generate lesson structure based on content
+export const generateLessons = async ({ title, source, content, fileName, url }) => {
+  const prompt = `Based on the following content, generate a structured lesson plan with 3-5 key learning modules.
+
+Content Title: ${title}
+Source Type: ${source}
+${fileName ? `File Name: ${fileName}` : ''}
+${url ? `URL: ${url}` : ''}
+
+Content: ${content.substring(0, 3000)} ${content.length > 3000 ? '...' : ''}
+
+Please generate lessons with the following format:
+{
+  "lessons": [
+    {
+      "title": "Lesson title",
+      "content": "Lesson content and key points",
+      "order": 1
+    }
+  ]
+}`;
+
+  try {
+    const response = await makeAICall(prompt);
+    return response.lessons || [];
+  } catch (error) {
+    console.error('Error generating lessons:', error);
+    throw error;
+  }
+};
+
+// Helper function to make AI calls with the existing rotation system
+const makeAICall = async (prompt) => {
+  try {
+    const text = await makeGeminiCallWithRotation(prompt);
+
+    try {
+      const parsed = parseAiJsonSafely(text);
+      return parsed;
+    } catch (err) {
+      console.warn('Failed to parse AI response in makeAICall, attempting one reformat retry:', err.message);
+      // One controlled re-ask: ask the model to reformat the previous response into valid JSON only
+      try {
+        const reformatPrompt = 'The previous model response was not valid JSON. Below is the full response. Please return the SAME JSON object only, wrapped in a single ```json ... ``` fenced code block. Do NOT add any extra text or explanations. For any code samples inside string fields, replace newlines with the two-character sequence \\n and escape double quotes as \\\".\n\nPREVIOUS RESPONSE:\n' + text;
+        const reformattedText = await makeGeminiCallWithRotation(reformatPrompt);
+        try {
+          const parsed2 = parseAiJsonSafely(reformattedText);
+          console.log('✅ Successfully parsed after controlled reformat retry');
+          return parsed2;
+        } catch (err2) {
+          console.error('Reformat retry also failed to produce valid JSON:', err2);
+          throw err2;
+        }
+      } catch (retryErr) {
+        console.error('Controlled reformat retry failed:', retryErr);
+        throw err;
+      }
+    }
+  } catch (error) {
+    console.error('Error in makeAICall:', error);
+    throw error;
+  }
+};
